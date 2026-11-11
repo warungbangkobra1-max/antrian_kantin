@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Build Outputs
+build/
+dist/
+dist-ssr/
+.vercel/
+*.local
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime Database & Temp Data (Do not push student records)
+data/queues.json*
+data/*.tmp
+*.sqlite
+*.sqlite3
+
+# Logs & Debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System Files
+.DS_Store
+Thumbs.db

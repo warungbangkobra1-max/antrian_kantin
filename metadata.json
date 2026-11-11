@@ -1,0 +1,6 @@
+{
+  "name": "Antrean Kantin Santri",
+  "description": "Aplikasi antrean kantin sederhana untuk 1 HP terpusat dengan Mode Santri dan Mode Operator berpengaman PIN serta audio pemanggilan otomatis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
