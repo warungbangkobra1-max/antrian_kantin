@@ -29,6 +29,8 @@ interface KasirModeProps {
   onAddManualQueue: (number: string, name: string) => Promise<{ success: boolean; error?: string }>;
   onLogout: () => void;
   onSwitchToSantri: () => void;
+  onSwitchToKasir?: () => void;
+  onSwitchToDapur?: () => void;
   onSwitchToAdmin: () => void;
   onSwitchToDisplay: () => void;
   isOnline: boolean;
@@ -46,6 +48,7 @@ export const KasirMode: React.FC<KasirModeProps> = ({
   onAddManualQueue,
   onLogout,
   onSwitchToSantri,
+  onSwitchToDapur,
   onSwitchToAdmin,
   onSwitchToDisplay,
   isOnline,
@@ -135,6 +138,14 @@ export const KasirMode: React.FC<KasirModeProps> = ({
         <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
           <div className="flex items-center gap-2">
             <span>Beralih tampilan:</span>
+            {onSwitchToDapur && (
+              <button
+                onClick={onSwitchToDapur}
+                className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-800/50"
+              >
+                <span>Dapur</span>
+              </button>
+            )}
             <button
               onClick={onSwitchToAdmin}
               className="text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1 bg-purple-950/40 px-2 py-0.5 rounded-md border border-purple-800/50"

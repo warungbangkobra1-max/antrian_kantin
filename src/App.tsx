@@ -4,9 +4,12 @@ import { useRealtimeQueue } from './hooks/useRealtimeQueue';
 import { api } from './services/api';
 import { SantriMode } from './components/SantriMode';
 import { KasirMode } from './components/KasirMode';
+import { DapurMode } from './components/DapurMode';
 import { AdminMode } from './components/AdminMode';
 import { DisplayBoard } from './components/DisplayBoard';
 import { PinModal } from './components/PinModal';
+import { LoginModal } from './components/LoginModal';
+import { authService } from './services/auth';
 import { announceQueue } from './utils/audio';
 
 const STORAGE_KEY_AUTH = 'antrean_kantin_auth_user';
@@ -17,12 +20,16 @@ export default function App() {
     queues,
     stats,
     isOnline,
+    isCloudDb,
+    supabaseConfigured,
     lastAction,
+    enqueueOffline,
     refreshQueues,
   } = useRealtimeQueue();
 
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [activeView, setActiveView] = useState<'santri' | 'kasir' | 'admin' | 'display'>('santri');
+  const [activeView, setActiveView] = useState<'santri' | 'kasir' | 'dapur' | 'admin' | 'display'>('santri');
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [isCallingAudio, setIsCallingAudio] = useState<boolean>(false);
 
@@ -32,32 +39,48 @@ export default function App() {
       const urlParams = new URLSearchParams(window.location.search);
       const requestedView = urlParams.get('view') || urlParams.get('mode');
 
-      if (requestedView && ['santri', 'kasir', 'admin', 'display'].includes(requestedView)) {
-        setActiveView(requestedView as 'santri' | 'kasir' | 'admin' | 'display');
+      if (requestedView && ['santri', 'kasir', 'dapur', 'admin', 'display'].includes(requestedView)) {
+        setActiveView(requestedView as 'santri' | 'kasir' | 'dapur' | 'admin' | 'display');
         return;
       }
 
-      const savedAuth = localStorage.getItem(STORAGE_KEY_AUTH);
-      if (savedAuth) {
-        const parsed = JSON.parse(savedAuth);
-        setCurrentUser(parsed);
+      const savedUser = authService.getSavedUser();
+      if (savedUser) {
+        setCurrentUser(savedUser);
       }
 
       const savedView = localStorage.getItem(STORAGE_KEY_ACTIVE_VIEW);
-      if (savedView && ['santri', 'kasir', 'admin', 'display'].includes(savedView)) {
-        setActiveView(savedView as 'santri' | 'kasir' | 'admin' | 'display');
+      if (savedView && ['santri', 'kasir', 'dapur', 'admin', 'display'].includes(savedView)) {
+        setActiveView(savedView as 'santri' | 'kasir' | 'dapur' | 'admin' | 'display');
       }
     } catch (e) {
       console.warn('Failed to restore view state', e);
     }
   }, []);
 
-  const switchView = (view: 'santri' | 'kasir' | 'admin' | 'display') => {
+  const switchView = (view: 'santri' | 'kasir' | 'dapur' | 'admin' | 'display') => {
     setActiveView(view);
     try {
       localStorage.setItem(STORAGE_KEY_ACTIVE_VIEW, view);
     } catch (e) {
       console.warn(e);
+    }
+  };
+
+  // Login Sukses via Supabase Auth: Role otomatis dideteksi dari database profiles!
+  const handleLoginSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    setIsLoginModalOpen(false);
+    setIsPinModalOpen(false);
+
+    if (user.role === 'dapur') {
+      switchView('dapur');
+    } else if (user.role === 'kasir') {
+      switchView('kasir');
+    } else if (user.role === 'admin') {
+      switchView('admin');
+    } else {
+      switchView('santri');
     }
   };
 
@@ -70,12 +93,19 @@ export default function App() {
       token: 'kasir-token-' + Date.now(),
     };
     setCurrentUser(kasirUser);
-    try {
-      localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(kasirUser));
-    } catch (e) {
-      console.warn(e);
-    }
     switchView('kasir');
+  };
+
+  const handleUnlockDapur = (authenticatedUser?: AuthUser) => {
+    setIsPinModalOpen(false);
+    const dapurUser: AuthUser = authenticatedUser || {
+      username: 'dapur',
+      role: 'dapur',
+      name: 'Petugas Dapur',
+      token: 'dapur-token-' + Date.now(),
+    };
+    setCurrentUser(dapurUser);
+    switchView('dapur');
   };
 
   const handleUnlockAdmin = (authenticatedUser?: AuthUser) => {
@@ -87,21 +117,12 @@ export default function App() {
       token: 'admin-token-' + Date.now(),
     };
     setCurrentUser(adminUser);
-    try {
-      localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(adminUser));
-    } catch (e) {
-      console.warn(e);
-    }
     switchView('admin');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authService.logout();
     setCurrentUser(null);
-    try {
-      localStorage.removeItem(STORAGE_KEY_AUTH);
-    } catch (e) {
-      console.warn(e);
-    }
     switchView('santri');
   };
 
@@ -140,13 +161,51 @@ export default function App() {
     return String(highest + 1).padStart(3, '0');
   };
 
-  // Centralized action handlers
-  const handleAddQueue = async (number: string, name: string) => {
+  // Centralized action handlers with Offline & Online support
+  const handleAddQueue = async (payload: {
+    number: string;
+    name: string;
+    classRoom?: string;
+    items?: any[];
+    totalAmount?: number;
+    notes?: string;
+  }) => {
+    const clientId = `q-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const fullItem: QueueItem = {
+      id: clientId,
+      clientId,
+      number: payload.number,
+      name: payload.name,
+      classRoom: payload.classRoom || 'Santri Mandiri',
+      date: new Date().toISOString().split('T')[0],
+      createdAt: Date.now(),
+      jamMasuk: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      status: 'Menunggu',
+      operator: currentUser?.name || 'Santri Mandiri',
+      counter: 'Loket 1',
+      callCount: 0,
+      items: payload.items || [],
+      totalAmount: payload.totalAmount || 0,
+      notes: payload.notes,
+    };
+
+    // If currently offline, queue locally
+    if (!isOnline) {
+      enqueueOffline(fullItem);
+      return { success: true, offlineQueued: true };
+    }
+
     try {
-      await api.createQueue(number, name, currentUser?.name || 'Santri Mandiri');
+      await api.createQueue({
+        ...payload,
+        clientId,
+        operator: currentUser?.name || 'Santri Mandiri',
+      });
       return { success: true };
     } catch (err: unknown) {
-      return { success: false, error: (err as Error).message };
+      // In case network drops mid-request, save offline
+      enqueueOffline(fullItem);
+      return { success: true, offlineQueued: true };
     }
   };
 
@@ -161,6 +220,22 @@ export default function App() {
   const handleRecall = async (item: QueueItem) => {
     try {
       await api.recallQueue(item.id, currentUser?.name || 'Kasir');
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  const handleProcess = async (item: QueueItem) => {
+    try {
+      await api.processQueue(item.id);
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  const handleReady = async (item: QueueItem) => {
+    try {
+      await api.readyQueue(item.id);
     } catch (err: unknown) {
       alert((err as Error).message);
     }
@@ -210,13 +285,16 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
       {/* View Content */}
       <div className="flex-1">
-        {/* 1. HALAMAN SANTRI (Default, super bersih, tanpa menu yang mengganggu) */}
+        {/* 1. HALAMAN SANTRI (Default, meja kasir) */}
         {activeView === 'santri' && (
           <SantriMode
             onAddQueue={handleAddQueue}
             nextSuggestedNumber={calculateNextNumber()}
-            onOpenOperatorPin={() => setIsPinModalOpen(true)}
+            onOpenOperatorPin={() => setIsLoginModalOpen(true)}
             isOnline={isOnline}
+            isCloudDb={isCloudDb}
+            supabaseConfigured={supabaseConfigured}
+            currentQueues={queues}
           />
         )}
 
@@ -230,9 +308,13 @@ export default function App() {
             onRecall={handleRecall}
             onComplete={handleComplete}
             onSkip={handleSkip}
-            onAddManualQueue={handleAddQueue}
+            onAddManualQueue={async (num, name) => {
+              const res = await handleAddQueue({ number: num, name });
+              return res;
+            }}
             onLogout={handleLogout}
             onSwitchToSantri={() => switchView('santri')}
+            onSwitchToDapur={() => switchView('dapur')}
             onSwitchToAdmin={() => switchView('admin')}
             onSwitchToDisplay={() => switchView('display')}
             isOnline={isOnline}
@@ -240,7 +322,24 @@ export default function App() {
           />
         )}
 
-        {/* 3. HP ADMIN */}
+        {/* 3. DAPUR KANTIN */}
+        {activeView === 'dapur' && (
+          <DapurMode
+            user={currentUser || { username: 'dapur', role: 'dapur', name: 'Petugas Dapur', token: '' }}
+            queueList={queues}
+            onProcess={handleProcess}
+            onReady={handleReady}
+            onComplete={handleComplete}
+            onLogout={handleLogout}
+            onSwitchToSantri={() => switchView('santri')}
+            onSwitchToKasir={() => switchView('kasir')}
+            onSwitchToAdmin={() => switchView('admin')}
+            onSwitchToDisplay={() => switchView('display')}
+            isOnline={isOnline}
+          />
+        )}
+
+        {/* 4. HP ADMIN */}
         {activeView === 'admin' && (
           <AdminMode
             user={currentUser || { username: 'admin', role: 'admin', name: 'Admin Kantin', token: '' }}
@@ -258,16 +357,19 @@ export default function App() {
             onLogout={handleLogout}
             onSwitchToSantri={() => switchView('santri')}
             onSwitchToKasir={() => switchView('kasir')}
+            onSwitchToDapur={() => switchView('dapur')}
             onSwitchToDisplay={() => switchView('display')}
             isOnline={isOnline}
+            isCloudDb={isCloudDb}
+            supabaseConfigured={supabaseConfigured}
           />
         )}
 
-        {/* 4. LAYAR MONITOR / TV */}
+        {/* 5. LAYAR MONITOR / TV */}
         {activeView === 'display' && (
           <DisplayBoard
             currentlyCalledItem={currentlyCalledItem}
-            waitingList={queues.filter((q) => q.status === 'Menunggu')}
+            waitingList={queues.filter((q) => q.status === 'Menunggu' || q.status === 'Diproses')}
             stats={stats}
             isOnline={isOnline}
             onExit={() => switchView('santri')}
@@ -276,11 +378,19 @@ export default function App() {
         )}
       </div>
 
-      {/* Touch-Friendly PIN Modal to unlock Mode Operator */}
+      {/* Supabase Auth Modal untuk Petugas (Dapur, Kasir, Admin) */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onSuccess={handleLoginSuccess}
+      />
+
+      {/* Touch-Friendly PIN Modal sebagai alternatif */}
       <PinModal
         isOpen={isPinModalOpen}
         onClose={() => setIsPinModalOpen(false)}
         onSuccessKasir={handleUnlockKasir}
+        onSuccessDapur={handleUnlockDapur}
         onSuccessAdmin={handleUnlockAdmin}
       />
     </div>

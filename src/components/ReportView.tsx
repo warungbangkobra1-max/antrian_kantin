@@ -17,7 +17,11 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { QueueItem, QueueStatus, ReportPeriod, ReportSummary } from '../types';
-import { exportQueueReportToExcel } from '../utils/excelExport';
+import {
+  exportQueueReportToExcel,
+  exportQueueReportToCSV,
+  exportQueueReportToPDF,
+} from '../utils/reportExport';
 
 interface ReportViewProps {
   queueList: QueueItem[];
@@ -146,11 +150,14 @@ export const ReportView: React.FC<ReportViewProps> = ({ queueList }) => {
         ...dailyMap[date],
       }));
 
+    const totalRevenue = periodFilteredItems.reduce((acc, item) => acc + (item.totalAmount || 0), 0);
+
     return {
       total,
       completed,
       skipped,
       cancelled,
+      totalRevenue,
       avgWaitMinutes,
       avgServiceMinutes,
       hourlyStats,
@@ -256,14 +263,35 @@ export const ReportView: React.FC<ReportViewProps> = ({ queueList }) => {
             </p>
           </div>
 
-          {/* GIANT EXCEL DOWNLOAD BUTTON */}
-          <button
-            onClick={handleDownloadExcel}
-            className="px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2.5 border-t border-emerald-400 cursor-pointer"
-          >
-            <Download className="w-5 h-5 animate-bounce" />
-            <span>📥 UNDUH EXCEL (.XLSX)</span>
-          </button>
+          {/* THREE EXPORT BUTTONS: EXCEL, CSV, PDF */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => exportQueueReportToExcel(tableData, summary, getPeriodLabel())}
+              className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              title="Unduh format spreadsheet Excel"
+            >
+              <Download className="w-4 h-4" />
+              <span>Excel (.xlsx)</span>
+            </button>
+
+            <button
+              onClick={() => exportQueueReportToCSV(tableData, getPeriodLabel())}
+              className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              title="Unduh format CSV"
+            >
+              <Download className="w-4 h-4" />
+              <span>CSV</span>
+            </button>
+
+            <button
+              onClick={() => exportQueueReportToPDF(tableData, summary, getPeriodLabel())}
+              className="px-3 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              title="Unduh format dokumen cetak PDF"
+            >
+              <Download className="w-4 h-4" />
+              <span>PDF</span>
+            </button>
+          </div>
         </div>
 
         {/* Period Selector Tabs */}
@@ -321,7 +349,19 @@ export const ReportView: React.FC<ReportViewProps> = ({ queueList }) => {
       </div>
 
       {/* KPI METRIC CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        {/* Total Omzet Penjualan */}
+        <div className="bg-gradient-to-br from-emerald-700 to-teal-800 text-white p-4 rounded-3xl shadow-sm col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between text-emerald-200 text-xs font-extrabold uppercase">
+            <span>Total Omzet</span>
+            <TrendingUp className="w-4 h-4 text-emerald-300" />
+          </div>
+          <div className="font-mono-num text-2xl sm:text-3xl font-black text-white my-1">
+            Rp {(summary.totalRevenue || 0).toLocaleString('id-ID')}
+          </div>
+          <div className="text-[11px] text-emerald-200 font-medium">Pendapatan kantin</div>
+        </div>
+
         {/* Total Antrean */}
         <div className="bg-white p-4 rounded-3xl border border-slate-200/90 shadow-xs">
           <div className="flex items-center justify-between text-slate-400 text-xs font-extrabold uppercase">
@@ -331,7 +371,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ queueList }) => {
           <div className="font-mono-num text-3xl sm:text-4xl font-black text-slate-900 my-1">
             {summary.total}
           </div>
-          <div className="text-[11px] text-slate-500 font-medium">Santri terdaftar di sistem</div>
+          <div className="text-[11px] text-slate-500 font-medium">Santri terdaftar</div>
         </div>
 
         {/* Selesai Dilayani */}

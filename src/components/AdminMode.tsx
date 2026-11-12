@@ -43,8 +43,11 @@ interface AdminModeProps {
   onLogout: () => void;
   onSwitchToSantri: () => void;
   onSwitchToKasir: () => void;
+  onSwitchToDapur?: () => void;
   onSwitchToDisplay: () => void;
   isOnline: boolean;
+  isCloudDb?: boolean;
+  supabaseConfigured?: boolean;
 }
 
 export const AdminMode: React.FC<AdminModeProps> = ({
@@ -63,8 +66,11 @@ export const AdminMode: React.FC<AdminModeProps> = ({
   onLogout,
   onSwitchToSantri,
   onSwitchToKasir,
+  onSwitchToDapur,
   onSwitchToDisplay,
   isOnline,
+  isCloudDb = false,
+  supabaseConfigured = false,
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [filter, setFilter] = useState<'semua' | QueueStatus>('semua');
@@ -84,6 +90,20 @@ export const AdminMode: React.FC<AdminModeProps> = ({
 
   const getStatusBadge = (status: QueueStatus) => {
     switch (status) {
+      case 'Diproses':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+            <span>👨‍🍳</span>
+            <span>Diproses</span>
+          </span>
+        );
+      case 'Siap':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
+            <span>✨</span>
+            <span>Siap Diambil</span>
+          </span>
+        );
       case 'Menunggu':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
@@ -227,6 +247,14 @@ export const AdminMode: React.FC<AdminModeProps> = ({
           </button>
 
           <div className="ml-auto flex items-center gap-2 pl-3">
+            {onSwitchToDapur && (
+              <button
+                onClick={onSwitchToDapur}
+                className="text-[11px] text-amber-400 hover:text-amber-300 font-bold px-2 py-1 rounded bg-slate-800 border border-slate-700 whitespace-nowrap"
+              >
+                Dapur
+              </button>
+            )}
             <button
               onClick={onSwitchToKasir}
               className="text-[11px] text-blue-400 hover:text-blue-300 font-bold px-2 py-1 rounded bg-slate-800 border border-slate-700 whitespace-nowrap"
@@ -431,6 +459,8 @@ export const AdminMode: React.FC<AdminModeProps> = ({
                 [
                   { id: 'semua', label: 'Semua', count: stats.total },
                   { id: 'Menunggu', label: 'Menunggu', count: stats.waiting },
+                  { id: 'Diproses', label: 'Diproses', count: stats.processing || 0 },
+                  { id: 'Siap', label: 'Siap', count: stats.ready || 0 },
                   { id: 'Dipanggil', label: 'Dipanggil', count: stats.called },
                   { id: 'Selesai', label: 'Selesai', count: stats.completed },
                   { id: 'Dilewati', label: 'Dilewati', count: stats.skipped },

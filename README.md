@@ -1,213 +1,176 @@
 # 🏫 ANTREAN KANTIN SANTRI
 
-> Sistem antrean kantin modern berbasis web & mobile dengan arsitektur **1 HP terpusat di meja kasir**, database online terpusat, sinkronisasi *real-time* multi-perangkat (Santri, Kasir, Admin, Layar TV), pemanggilan suara otomatis (*chime* & Text-to-Speech), serta laporan analitik lengkap yang dapat diekspor ke format Excel (.xlsx 3 Sheet).
+> Sistem antrean kantin modern berbasis web & mobile terintegrasi **Supabase PostgreSQL**, sinkronisasi *real-time* multi-perangkat (Santri, Kasir, Dapur, Admin, Layar TV), dukungan **Online & Offline** dengan auto-sync, pemanggilan suara otomatis (*chime* & Text-to-Speech), serta laporan transaksi dan analitik lengkap yang dapat diunduh ke format **Excel (.xlsx)**, **CSV**, dan **PDF**.
 
 ---
 
 ## 📌 1. Konsep Utama & Alur Kerja
 
-Aplikasi dirancang agar **sangat sederhana, cepat, dan mandiri**:
+Aplikasi dirancang untuk efisiensi transaksi di kantin santri:
 
-1. **1 HP di Meja Kasir**: Diletakkan menghadap santri saat memesan/mengambil makanan.
-2. **Santri Mengisi Sendiri**:
-   - Santri datang ke meja kasir.
-   - Mengisi **Nomor Antrean** (kupon fisik/otomatis) dan **Nama Santri**.
+1. **HP Kiosk di Meja Kasir (Mode Santri)**:
+   - Diletakkan menghadap santri.
+   - Santri mengisi **Nomor Antrean** dan **Nama Santri** (opsional: pilih kelas/kamar atau menu makanan).
    - Menekan tombol hijau besar **`🟢 AMBIL ANTREAN`**.
-   - Santri **tidak perlu login**, tidak perlu akun, dan tidak perlu membawa HP pribadi.
-3. **Data Langsung Tersimpan ke Server**:
-   - Server memvalidasi agar nomor antrean yang sedang aktif **tidak dapat digunakan ganda**.
-   - Layar santri menampilkan tiket berhasil:
-     ```
-     ✅ ANTREAN BERHASIL
-     A025 - Ahmad
-     Silakan menunggu sampai nomor dipanggil.
-     ```
-   - Dalam 4 detik, layar otomatis kembali ke form awal untuk santri berikutnya.
-4. **Kasir Memanggil Antrean**:
-   - Kasir membuka Mode Operator dengan **PIN 4-digit** (`1234`).
-   - Kasir menekan `🔊 PANGGIL` / `🔁 PANGGIL ULANG` / `✅ SELESAI` / `⏭️ LEWATI`.
-   - Speaker HP membunyikan bel denting (*crystal chime*) dan suara panggilan Bahasa Indonesia:
-     *“Nomor A025, atas nama Ahmad, silakan maju.”*
-   - Dengan 1 sentuhan tombol `📱 Layar Santri`, HP langsung terkunci kembali ke mode santri.
-5. **Admin & Layar TV Terhubung Real-Time**:
-   - Setiap aksi pemanggilan atau penyelesaian di kasir langsung terupdate di HP Admin dan Layar TV tanpa perlu refresh manual.
+   - Santri **tidak perlu login**, aman, cepat, dan higienis.
+2. **Anti-Duplikasi & Nomor Otomatis**:
+   - Sistem memvalidasi agar nomor antrean yang aktif tidak dapat diambil ganda pada hari yang sama.
+   - Tersedia generator nomor harian otomatis (A001, A002, dst.) yang ter-reset setiap hari.
+3. **Dukungan Online & Offline**:
+   - **Online**: Data tersimpan langsung ke Supabase PostgreSQL dan tersinkronisasi *real-time* ke semua HP petugas.
+   - **Offline**: Jika internet terputus, santri tetap bisa mengambil antrean. Pesanan tersimpan aman di penyimpanan lokal browser dengan ID unik (idempotency) dan otomatis dikirim saat koneksi internet kembali tanpa duplikasi.
+4. **Alur 4 Role Terintegrasi**:
+   - **SANTRI**: Mengambil antrean, melihat menu, dan mengecek status pesanan.
+   - **KASIR**: Memanggil antrean (`🔊 PANGGIL`, `🔁 PANGGIL ULANG`, `⏭️ LEWATI`, `✅ SELESAI`), menerima pembayaran, dan mencetak/menampilkan nomor.
+   - **DAPUR**: Melihat pesanan makanan masuk, memproses pesanan (`👨‍🍳 DIPROSES`), dan menandai siap diambil (`✨ SIAP`).
+   - **ADMIN**: Memantau dashboard KPI, mengelola santri & menu, membatalkan/menghapus antrean salah, menganalisis jam sibuk, serta mengunduh laporan.
 
 ---
 
 ## 🌟 2. Fitur-Fitur Utama
 
 ### 📱 Mode Santri (Kiosk Mandiri)
-- Tampilan sangat bersih, kontras tinggi, dan ramah sentuhan.
-- Hanya menampilkan kolom input nomor, nama, dan tombol besar **AMBIL ANTREAN**.
-- Proteksi anti-dobel: Menolak jika nomor antrean sedang aktif di antrean.
-- Layar konfirmasi berhasil dengan animasi countdown otomatis.
-- Tombol rahasia gembok PIN untuk petugas di sudut atas.
+- Tampilan sangat bersih, kontras tinggi, ramah sentuhan santri.
+- Input nomor antrean dan nama santri.
+- Tab **Menu Kantin**: Santri dapat melihat katalog menu dan memilih makanan/minuman yang dipesan.
+- Tab **Cek Status**: Santri dapat memantau status pesanannya (*Menunggu*, *Diproses*, *Siap*, *Selesai*).
+- Proteksi anti-dobel nomor aktif.
+- Tiket konfirmasi berhasil dengan animasi countdown otomatis.
+- Gembok PIN rahasia untuk akses petugas (Kasir, Dapur, Admin).
 
-### 💼 Mode Operator / Kasir (PIN: `1234`)
-- **SEDANG DIPANGGIL**: Kartu display besar nomor & nama santri.
-- **Kontrol Antrean**:
-  - `🔊 PANGGIL`: Membunyikan bel dan suara panggilan.
-  - `🔁 PANGGIL ULANG`: Memanggil kembali santri yang belum mendengar.
-  - `✅ SELESAI`: Menyelesaikan pesanan dan memuat antrean berikutnya.
+### 👨‍🍳 Mode Dapur (PIN: `2222` / Akun: `dapur` / `dapur123`)
+- Tampilan Kanban pesanan:
+  1. **Pesanan Masuk (Menunggu)**: Detail nama, nomor antrean, dan catatan pesanan.
+  2. **Sedang Dimasak (Diproses)**: Tombol *Mulai Siapkan*.
+  3. **Siap Diambil (Siap)**: Tombol *Makanan Siap* untuk menginfokan kasir & santri.
+
+### 💼 Mode Operator / Kasir (PIN: `1234` / Akun: `kasir` / `kasir123`)
+- **SEDANG DILAYANI**: Display raksasa nomor & nama santri.
+- Tombol aksi:
+  - `🔊 PANGGIL`: Membunyikan bel denting (*chime*) dan suara synthesizer panggilan Bahasa Indonesia:
+    *“Nomor A025, atas nama Ahmad, silakan maju.”*
+  - `🔁 PANGGIL ULANG`: Panggil ulang santri yang belum mendengar.
+  - `✅ SELESAI`: Menyelesaikan pesanan.
   - `⏭️ LEWATI`: Menandai santri yang belum hadir.
-- **Daftar Antrean Menunggu**: Urutan santri berikutnya siap dilayani.
-- **Tombol Pintas `📱 Layar Santri`**: Mengunci kembali ke mode santri dalam 1 klik.
+- Daftar antrean menunggu terurut.
+- Tombol pintas `📱 Layar Santri` untuk mengunci kembali HP ke meja santri.
 
 ### 👑 Mode Admin (PIN: `9999` / Akun: `admin` / `admin123`)
-- **🏠 Dashboard**: Ringkasan KPI antrean harian, antrean aktif, dan feed waktu nyata.
-- **👥 Antrean**: Tabel manajemen status antrean, batalkan antrean, dan hapus antrean salah.
-- **📊 Laporan**: Filter laporan berdasarkan tanggal/periode, grafik jam sibuk, dan unduh Excel.
-- **⚙️ Pengaturan**: Uji coba suara bel dan konfirmasi reset antrean harian.
+- **🏠 Dashboard**: Statistik KPI harian, ringkasan omzet, dan feed antrean aktif.
+- **👥 Antrean**: Manajemen seluruh antrean, filter status lengkap, batalkan antrean, dan hapus antrean yang salah.
+- **📊 Laporan**: Analisis jam sibuk kantin (06:00 - 18:00), rata-rata durasi tunggu, dan ekspor dokumen.
+- **⚙️ Pengaturan**: Uji coba bel panggilan dan reset antrean harian.
 
-### 📊 Laporan & Unduh Excel (.xlsx)
-- Pilihan periode: **Hari ini**, **Kemarin**, **Minggu ini**, **Bulan ini**, atau **Pilih tanggal sendiri**.
+### 📊 Laporan Lengkap (Excel, CSV, PDF)
+- Filter rentang periode: **Hari ini**, **Kemarin**, **Minggu ini**, **Bulan ini**, atau **Pilih tanggal sendiri**.
 - Indikator efisiensi:
-  - Rata-rata waktu tunggu santri.
-  - Rata-rata waktu pelayanan kasir.
-  - Grafik batang jumlah antrean per jam (jam sibuk kantin 06:00 - 18:00).
-- **Unduh File Excel (.xlsx) 3 Sheet Rapi**:
-  - `Sheet 1 – Data Antrean`: Detail lengkap per santri (ID, Tanggal, Jam Masuk, Nomor, Nama, Status, Jam Dipanggil, Jam Selesai, Waktu Tunggu, Operator).
-  - `Sheet 2 – Ringkasan`: Rekapitulasi total santri, persentase penyelesaian, rata-rata durasi.
-  - `Sheet 3 – Statistik Harian`: Tren antrean per tanggal.
+  - Total antrean & persentase selesai.
+  - Total omzet pendapatan kantin.
+  - Rata-rata waktu tunggu santri (menit).
+  - Rata-rata waktu pelayanan kasir (menit).
+- **Format Unduhan**:
+  - `📥 Excel (.xlsx)`: 2 Sheet rapi (*Data Antrean* & *Ringkasan & Omzet*).
+  - `📄 CSV`: Format standar untuk diimpor ke aplikasi spreadsheet lainnya.
+  - `📑 PDF`: Dokumen siap cetak dengan tata letak laporan formal.
 
 ### 📺 Papan Layar TV / Monitor Dinding
-- Tampilan layar penuh gelap elegan (*dark mode*) untuk dipasang di monitor/TV dinding kantin.
-- Menampilkan nomor yang sedang dipanggil dalam ukuran raksasa dan antrean berikutnya.
+- Tampilan layar penuh gelap elegan (*dark mode*) untuk monitor/TV gantung kantin.
+- Nomor yang sedang dipanggil tampil raksasa bersama antrean berikutnya.
 
 ---
 
-## 🗄️ 3. Arsitektur Database & Real-Time
+## 🗄️ 3. Arsitektur Database: Supabase PostgreSQL
 
-- **Server-Authoritative**: Server Node.js/Express (`server.ts`) menjadi satu-satunya sumber kebenaran (*single source of truth*).
-- **Real-Time Streaming**: Menggunakan teknologi **Server-Sent Events (SSE)** pada rute `/api/queues/events`.
-- **Penyimpanan Persisten**: Data tersimpan secara persisten pada file `data/queues.json` dengan penulisan atomik. Data tidak akan hilang saat server atau browser di-refresh.
-- **Resiliensi Jaringan**:
-  - Tampilan indikator `🟢 ONLINE` / `🔴 OFFLINE`.
-  - Otomatis rekonsiliasi dan sinkronisasi ulang saat koneksi internet pulih.
+Aplikasi menggunakan **Supabase PostgreSQL** sebagai satu-satunya database online terpusat.
+
+### Tabel Database Utama (`supabase/schema.sql`):
+1. `profiles`: Data pengguna dan petugas kantin beserta perannya (`admin`, `kasir`, `dapur`, `santri`).
+2. `students`: Data santri, NIS, kelas/kamar, dan saldo.
+3. `categories`: Kategori produk kantin (*Makanan Berat*, *Minuman Segar*, *Camilan*).
+4. `products`: Daftar menu makanan dan minuman, harga, dan stok.
+5. `queue_numbers`: Nomor urut antrean harian dengan constraint unik anti-duplikasi (`queue_date`, `daily_seq`).
+6. `orders`: Catatan antrean dan pesanan santri beserta status (`menunggu`, `diproses`, `siap`, `selesai`, `dibatalkan`, `dilewati`).
+7. `order_items`: Rincian item menu makanan dalam setiap pesanan.
+8. `payments`: Riwayat pembayaran kasir (tunai, saldo santri, QRIS).
+9. `inventory` & `inventory_movements`: Pengelolaan stok bahan dan barang kantin.
+10. `daily_reports`: Agregasi laporan harian dan omzet.
+
+### Cara Menjalankan Skema SQL di Supabase:
+1. Buka dashboard [supabase.com](https://supabase.com) dan buat project baru.
+2. Di bilah samping, buka menu **SQL Editor**.
+3. Buka file `supabase/schema.sql` dari project ini, salin seluruh kodenya, lalu tempel di SQL Editor Supabase.
+4. Klik tombol **Run**. Seluruh tabel, fungsi anti-duplikasi, RLS, dan seed data menu awal akan otomatis terpasang!
 
 ---
 
-## 🚀 4. Panduan Menjalankan Aplikasi
+## 🔑 4. Environment Variables
+
+Salin file `.env.example` ke `.env.local` saat mengembangkan aplikasi secara lokal:
+
+```bash
+cp .env.example .env.local
+```
+
+### Daftar Environment Variables Final:
+
+Aplikasi menggunakan **Supabase Auth** untuk autentikasi pengguna. Role (`ADMIN`, `KASIR`, `DAPUR`, `SANTRI`) dikontrol langsung dari tabel `profiles` di database Supabase PostgreSQL. Tidak ada username, password, atau PIN yang disimpan di environment variable.
+
+Aplikasi **hanya membutuhkan 3 variabel**:
+
+| Variabel | Keterangan | Wajib/Opsional | Sumber Nilai |
+| :--- | :--- | :--- | :--- |
+| **`NEXT_PUBLIC_SUPABASE_URL`** | URL API project Supabase | **Wajib** | Supabase Dashboard → Settings → API |
+| **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** | Anon public key Supabase (Aman di browser) | **Wajib** | Supabase Dashboard → Settings → API |
+| **`SUPABASE_SERVICE_ROLE_KEY`** | Secret service role key (Hanya Backend/Serverless) | **Opsional (Server-side)** | Supabase Dashboard → Settings → API |
+
+> **Catatan Bersih**: Variabel `DAPUR_USERNAME`, `DAPUR_PASSWORD`, `DAPUR_PIN`, `ADMIN_*`, `KASIR_*`, `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `GITHUB_TOKEN`, dan `VERCEL_TOKEN` tidak digunakan dan telah dihapus sepenuhnya dari aplikasi.
+
+---
+
+## 🚀 5. Cara Menjalankan Aplikasi Secara Lokal
 
 ### Prasyarat
-- **Node.js** (versi 18 ke atas)
+- **Node.js** (versi 18+)
 - **npm** atau **bun**
 
-### Langkah Instalasi
-
-1. **Clone repository:**
-   ```bash
-   git clone https://github.com/<username>/<nama-repo>.git
-   cd antrean-kantin-santri
-   ```
-
-2. **Install dependensi:**
+### Langkah Menjalankan:
+1. **Install dependencies:**
    ```bash
    npm install
    ```
 
-3. **Konfigurasi Environment:**
-   Salin file konfigurasi contoh:
-   ```bash
-   cp .env.example .env
-   ```
-   Sesuaikan variabel jika diperlukan (misal: PIN kasir, password admin).
-
-4. **Jalankan Mode Pengembangan:**
+2. **Jalankan development server:**
    ```bash
    npm run dev
    ```
-   Buka browser di `http://localhost:3000`.
+   Aplikasi akan berjalan di `http://localhost:3000`.
 
-5. **Build Produksi:**
+3. **Build untuk produksi:**
    ```bash
    npm run build
-   npm start
    ```
 
 ---
 
-## ⚙️ 5. Konfigurasi Environment (`.env`)
+## 🌐 6. Panduan Deployment ke GitHub & Vercel
 
-Aplikasi hanya memerlukan variabel lingkungan berikut untuk autentikasi server-side dan port server (tidak menggunakan GitHub OAuth atau token eksternal di aplikasi):
-
-| Variabel | Keterangan | Default | Lokasi Validasi |
-|---|---|---|---|
-| `PORT` | Port server Node.js | `3000` | Server-side |
-| `NODE_ENV` | Mode runtime (`development` / `production`) | `production` | Server-side |
-| `APP_URL` | Base URL deployment aplikasi | `http://localhost:3000` | Server-side |
-| `ADMIN_USERNAME` | Username login Administrator | `admin` | Server-side |
-| `ADMIN_PASSWORD` | Password login Administrator | `admin123` | Server-side |
-| `ADMIN_PIN` | PIN 4-digit akses Administrator di layar kiosk | `9999` | Server-side |
-| `KASIR_USERNAME` | Username login Operator Kasir | `kasir` | Server-side |
-| `KASIR_PASSWORD` | Password login Operator Kasir | `kasir123` | Server-side |
-| `KASIR_PIN` | PIN 4-digit akses Mode Kasir di meja kasir | `1234` | Server-side |
-
-> **Catatan Sinkronisasi GitHub**: Penyimpanan dan sinkronisasi source code GitHub dikelola langsung melalui fitur GitHub bawaan Google AI Studio. Aplikasi tidak membutuhkan `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, atau `GITHUB_TOKEN`.
-
----
-
-## ☁️ 6. Panduan Deployment ke Vercel
-
-Aplikasi ini sudah dikonfigurasi penuh dengan file `vercel.json` dan serverless entry point `api/index.ts` sehingga dapat langsung di-deploy dari repository GitHub ke Vercel:
-
-```
-Google AI Studio  →  GitHub (antrean-kantin-santri)  →  Vercel  →  Aplikasi Online
-```
-
-### Langkah Deployment ke Vercel:
-
-1. **Login ke Vercel**: Buka [vercel.com](https://vercel.com) dan login menggunakan akun GitHub Anda.
-2. **Import Repository**:
-   - Klik tombol **"Add New..."** lalu pilih **"Project"**.
-   - Cari dan pilih repository **`antrean-kantin-santri`** (atau repository yang Anda hubungkan).
-3. **Konfigurasi Project**:
-   - **Framework Preset**: *Vite* (terdeteksi otomatis).
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-4. **Environment Variables di Vercel Dashboard** (Settings → Environment Variables):
-   Tambahkan variabel berikut:
-   - `ADMIN_USERNAME` = `admin`
-   - `ADMIN_PASSWORD` = `(password admin Anda)`
-   - `ADMIN_PIN` = `9999`
-   - `KASIR_USERNAME` = `kasir`
-   - `KASIR_PASSWORD` = `(password kasir Anda)`
-   - `KASIR_PIN` = `1234`
-   - *(Opsional Database Online)*: Tambahkan integrasi **Upstash Redis / Vercel KV** di tab **Storage** Vercel, maka variabel `KV_REST_API_URL` dan `KV_REST_API_TOKEN` akan otomatis terisi untuk database online terpusat permanen.
-5. **Klik "Deploy"**:
-   - Vercel akan otomatis melakukan build frontend (`dist`) dan mendeploy API backend ke Serverless Function (`/api`).
-   - Aplikasi siap diakses online melalui domain Vercel Anda, misalnya: `https://antrean-kantin-santri.vercel.app`.
-
----
-
-## ☁️ 7. Panduan Deployment Alternatif (Docker / VPS)
-
-### A. Google Cloud Run / Docker
-Aplikasi sudah siap dijalankan di container Docker atau Google Cloud Run:
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "start"]
-```
-
-### B. VPS (Ubuntu/Debian dengan PM2)
+### A. Push ke GitHub
 ```bash
-# Build aplikasi
-npm run build
-
-# Jalankan dengan PM2
-npm install -g pm2
-pm2 start server.ts --name "kantin-santri" --interpreter tsx
-pm2 save
-pm2 startup
+git add .
+git commit -m "feat: implement Supabase Auth, database-controlled roles, and clean env variables"
+git branch -M main
+git remote add origin https://github.com/<username>/<nama-repo>.git
+git push -u origin main
 ```
 
----
+### B. Deploy di Vercel
+1. Buka [vercel.com](https://vercel.com) dan login.
+2. Klik **Add New...** → **Project**.
+3. Pilih repository GitHub Anda (`antrean-kantin-santri`).
+4. Pada bagian **Environment Variables**, cukup tambahkan **3 variabel** berikut:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+5. Klik **Deploy**.
+6. Aplikasi Anda akan langsung aktif dengan domain Vercel online (contoh: `https://antrean-kantin-santri.vercel.app`).
 
-## 📄 Lisensi
-Apache-2.0 License. Dibuat khusus untuk kenyamanan dan ketertiban kantin santri di pondok pesantren.

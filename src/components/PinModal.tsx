@@ -7,6 +7,7 @@ interface PinModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccessKasir: (user?: AuthUser) => void;
+  onSuccessDapur: (user?: AuthUser) => void;
   onSuccessAdmin: (user?: AuthUser) => void;
 }
 
@@ -14,6 +15,7 @@ export const PinModal: React.FC<PinModalProps> = ({
   isOpen,
   onClose,
   onSuccessKasir,
+  onSuccessDapur,
   onSuccessAdmin,
 }) => {
   const [pin, setPin] = useState('');
@@ -40,6 +42,8 @@ export const PinModal: React.FC<PinModalProps> = ({
           setError(false);
           if (res.role === 'admin') {
             onSuccessAdmin(res.user);
+          } else if (res.role === 'dapur') {
+            onSuccessDapur(res.user);
           } else {
             onSuccessKasir(res.user);
           }

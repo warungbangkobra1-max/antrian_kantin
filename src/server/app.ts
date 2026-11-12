@@ -1,20 +1,70 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
-import { QueueItem, QueueStats } from '../types';
+import { QueueItem, QueueStats, ProductItem } from '../types';
 import { db, getTodayDateString, getTimeString } from './db';
+import { getSupabaseServerClient, isServerSupabaseConfigured } from '../lib/supabase/server';
 
 dotenv.config();
 
 export const app = express();
 
-// Kredensial Keamanan Server-Side (Environment Variables)
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const ADMIN_PIN = process.env.ADMIN_PIN || '9999';
-
-const KASIR_USERNAME = process.env.KASIR_USERNAME || 'kasir';
-const KASIR_PASSWORD = process.env.KASIR_PASSWORD || 'kasir123';
-const KASIR_PIN = process.env.KASIR_PIN || '1234';
+// Sample Menu Produk Kantin Santri
+export const DEFAULT_PRODUCTS: ProductItem[] = [
+  {
+    id: 'prod-1',
+    categoryName: 'Makanan Berat',
+    name: 'Nasi Pecel Telur',
+    description: 'Nasi dengan pecel sayur segar bumbu kacang dan telur dadar',
+    price: 10000,
+    stock: 100,
+    isAvailable: true,
+  },
+  {
+    id: 'prod-2',
+    categoryName: 'Makanan Berat',
+    name: 'Nasi Goreng Santri',
+    description: 'Nasi goreng khas kantin dengan suwiran ayam dan kerupuk',
+    price: 12000,
+    stock: 80,
+    isAvailable: true,
+  },
+  {
+    id: 'prod-3',
+    categoryName: 'Makanan Berat',
+    name: 'Mie Ayam Bakso',
+    description: 'Mie kuah gurih disajikan dengan pangsit dan bakso sapi',
+    price: 12000,
+    stock: 75,
+    isAvailable: true,
+  },
+  {
+    id: 'prod-4',
+    categoryName: 'Minuman Segar',
+    name: 'Es Teh Manis',
+    description: 'Teh melati segar manis dingin',
+    price: 3000,
+    stock: 200,
+    isAvailable: true,
+  },
+  {
+    id: 'prod-5',
+    categoryName: 'Minuman Segar',
+    name: 'Es Jeruk Peras',
+    description: 'Jeruk asli diperas segar dengan es batu',
+    price: 5000,
+    stock: 150,
+    isAvailable: true,
+  },
+  {
+    id: 'prod-6',
+    categoryName: 'Camilan & Roti',
+    name: 'Roti Bakar Cokelat',
+    description: 'Roti tawar bakar isi lelehan selai cokelat manis',
+    price: 8000,
+    stock: 50,
+    isAvailable: true,
+  },
+];
 
 // SSE Clients Registry
 const sseClients = new Set<Response>();
@@ -58,12 +108,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// 1. Health check endpoint (including cloud DB status)
+// 1. Health check endpoint (including Supabase status)
 app.get('/api/health', (req, res) => {
+  const isCloud = isServerSupabaseConfigured();
   res.json({
     status: 'ok',
     online: true,
-    cloudDb: db.isCloudDatabaseConfigured(),
+    database: isCloud ? 'supabase' : 'local_storage',
+    cloudDb: isCloud,
+    supabaseConfigured: isCloud,
     serverTime: Date.now(),
     clientsCount: sseClients.size,
   });
@@ -102,54 +155,91 @@ app.get('/api/queues/events', async (req, res) => {
   });
 });
 
-// 3. Authentication for Petugas (Kasir & Admin) via Environment Variables
-app.post('/api/auth/login', (req, res) => {
+// 3. Products list endpoint for Menu Kantin
+app.get('/api/products', (req, res) => {
+  res.json({
+    products: DEFAULT_PRODUCTS,
+  });
+});
+
+// 4. Authentication for Petugas (Dapur, Kasir, Admin) via Supabase Auth & Database Profiles
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   const cleanUser = String(username || '').trim().toLowerCase();
   const cleanPass = String(password || '').trim();
 
-  // Admin login check
-  if (
-    cleanUser === ADMIN_USERNAME.toLowerCase() &&
-    (cleanPass === ADMIN_PASSWORD || cleanPass === ADMIN_PIN)
-  ) {
+  if (!cleanUser || !cleanPass) {
+    res.status(400).json({ success: false, error: 'Username/email dan password wajib diisi!' });
+    return;
+  }
+
+  const supabase = getSupabaseServerClient();
+  if (supabase && isServerSupabaseConfigured()) {
+    const email = cleanUser.includes('@') ? cleanUser : `${cleanUser}@kantin.santri`;
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password: cleanPass,
+    });
+
+    if (authError || !authData.user) {
+      res.status(401).json({ success: false, error: authError?.message || 'Login gagal.' });
+      return;
+    }
+
+    // Ambil profile dan role dari tabel profiles di PostgreSQL
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, full_name, username')
+      .or(`auth_user_id.eq.${authData.user.id},id.eq.${authData.user.id}`)
+      .maybeSingle();
+
+    const role = profile?.role || authData.user.user_metadata?.role || 'santri';
+    const name = profile?.full_name || profile?.username || cleanUser;
+
     res.json({
       success: true,
       user: {
-        username: ADMIN_USERNAME,
-        role: 'admin',
-        name: 'Administrator Kantin',
-        token: 'auth-token-admin-' + Date.now(),
+        id: authData.user.id,
+        email: authData.user.email,
+        username: cleanUser.replace('@kantin.santri', ''),
+        role,
+        name,
+        token: authData.session?.access_token || `token-${Date.now()}`,
       },
     });
     return;
   }
 
-  // Kasir login check
-  if (
-    cleanUser === KASIR_USERNAME.toLowerCase() &&
-    (cleanPass === KASIR_PASSWORD || cleanPass === KASIR_PIN)
-  ) {
-    res.json({
-      success: true,
-      user: {
-        username: KASIR_USERNAME,
-        role: 'kasir',
-        name: 'Petugas Kasir',
-        token: 'auth-token-kasir-' + Date.now(),
-      },
-    });
-    return;
-  }
+  // Fallback mode lokal jika Supabase belum dikonfigurasi
+  const role: 'admin' | 'kasir' | 'dapur' | 'santri' = cleanUser.includes('dapur')
+    ? 'dapur'
+    : cleanUser.includes('kasir')
+    ? 'kasir'
+    : cleanUser.includes('admin')
+    ? 'admin'
+    : 'santri';
 
-  res.status(401).json({
-    success: false,
-    error: 'Username, password, atau PIN tidak valid!',
+  res.json({
+    success: true,
+    user: {
+      username: cleanUser,
+      role,
+      name:
+        role === 'admin'
+          ? 'Administrator Kantin'
+          : role === 'kasir'
+          ? 'Petugas Kasir'
+          : role === 'dapur'
+          ? 'Petugas Dapur Kantin'
+          : 'Santri',
+      token: `local-token-${Date.now()}`,
+    },
   });
 });
 
-// Verifikasi PIN Mode Operator & Admin di Meja Kasir (Server-side check)
-app.post('/api/auth/verify-pin', (req, res) => {
+// Verifikasi PIN Mode Operator di Meja Kasir (Diverifikasi melalui database profiles)
+app.post('/api/auth/verify-pin', async (req, res) => {
   const { pin } = req.body || {};
   const cleanPin = String(pin || '').trim();
 
@@ -158,54 +248,83 @@ app.post('/api/auth/verify-pin', (req, res) => {
     return;
   }
 
-  if (cleanPin === ADMIN_PIN) {
+  const supabase = getSupabaseServerClient();
+  if (supabase && isServerSupabaseConfigured()) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, full_name, username')
+      .eq('pin_code', cleanPin)
+      .maybeSingle();
+
+    if (profile) {
+      res.json({
+        success: true,
+        role: profile.role,
+        user: {
+          username: profile.username || profile.role,
+          role: profile.role,
+          name: profile.full_name || profile.username,
+          token: `pin-token-${profile.role}-${Date.now()}`,
+        },
+      });
+      return;
+    }
+  }
+
+  // Fallback PIN pengujian lokal jika Supabase belum terhubung
+  if (cleanPin === '9999') {
     res.json({
       success: true,
       role: 'admin',
-      user: {
-        username: ADMIN_USERNAME,
-        role: 'admin',
-        name: 'Administrator Kantin',
-        token: 'pin-token-admin-' + Date.now(),
-      },
+      user: { username: 'admin', role: 'admin', name: 'Administrator Kantin', token: `pin-admin-${Date.now()}` },
     });
     return;
   }
-
-  if (cleanPin === KASIR_PIN) {
+  if (cleanPin === '1234') {
     res.json({
       success: true,
       role: 'kasir',
-      user: {
-        username: KASIR_USERNAME,
-        role: 'kasir',
-        name: 'Petugas Kasir',
-        token: 'pin-token-kasir-' + Date.now(),
-      },
+      user: { username: 'kasir', role: 'kasir', name: 'Petugas Kasir', token: `pin-kasir-${Date.now()}` },
+    });
+    return;
+  }
+  if (cleanPin === '2222') {
+    res.json({
+      success: true,
+      role: 'dapur',
+      user: { username: 'dapur', role: 'dapur', name: 'Petugas Dapur Kantin', token: `pin-dapur-${Date.now()}` },
     });
     return;
   }
 
-  res.status(401).json({
-    success: false,
-    error: 'PIN salah! Silakan periksa kembali.',
-  });
+  res.status(401).json({ success: false, error: 'PIN salah! Silakan periksa kembali.' });
 });
 
-// 4. Get all queues and current stats
+// 5. Get all queues and current stats
 app.get('/api/queues', async (req, res) => {
   const queues = await db.getQueues();
   res.json({
     queues,
     stats: db.getStats(queues),
     cloudDb: db.isCloudDatabaseConfigured(),
+    databaseType: db.getDatabaseType(),
     serverTime: Date.now(),
   });
 });
 
-// 5. Add new queue (Santri or Kasir) with DUPLICATE NUMBER CHECK
+// 6. Add new queue (Santri or Kasir) with DUPLICATE NUMBER CHECK
 app.post('/api/queues', async (req, res) => {
-  const { number, name, operator, counter } = req.body || {};
+  const {
+    number,
+    name,
+    classRoom,
+    items,
+    totalAmount,
+    notes,
+    operator,
+    counter,
+    clientId,
+  } = req.body || {};
 
   const cleanName = String(name || '').trim();
   const rawNum = String(number || '').trim().toUpperCase();
@@ -232,26 +351,32 @@ app.post('/api/queues', async (req, res) => {
   const isDuplicateActive = queues.some(
     (q) =>
       q.number.toUpperCase() === formattedNum.toUpperCase() &&
-      (q.status === 'Menunggu' || q.status === 'Dipanggil')
+      (q.status === 'Menunggu' || q.status === 'Diproses' || q.status === 'Dipanggil' || q.status === 'Siap')
   );
 
   if (isDuplicateActive) {
     res.status(400).json({
-      error: `Nomor antrean ${formattedNum} sudah digunakan.`,
+      error: `Nomor antrean ${formattedNum} sedang aktif dan belum selesai.`,
     });
     return;
   }
 
   const createdAt = Date.now();
+  const newItemId = clientId || `q-${createdAt}-${Math.random().toString(36).substring(2, 7)}`;
+
   const newItem: QueueItem = {
-    id: `q-${createdAt}-${Math.random().toString(36).substring(2, 7)}`,
+    id: newItemId,
+    clientId: newItemId,
     number: formattedNum,
     name: cleanName,
+    classRoom: String(classRoom || 'Santri Mandiri').trim(),
     date: getTodayDateString(),
     createdAt,
     jamMasuk: getTimeString(createdAt),
     calledAt: null,
     jamDipanggil: null,
+    readyAt: null,
+    jamSiap: null,
     completedAt: null,
     jamSelesai: null,
     status: 'Menunggu',
@@ -260,10 +385,12 @@ app.post('/api/queues', async (req, res) => {
     callCount: 0,
     waitingDurationMinutes: 0,
     serviceDurationMinutes: 0,
+    items: Array.isArray(items) ? items : [],
+    totalAmount: Number(totalAmount) || 0,
+    notes: notes ? String(notes).trim() : undefined,
   };
 
-  queues.push(newItem);
-  await db.saveQueues(queues);
+  await db.upsertQueue(newItem);
   broadcastStateUpdate('CREATE', newItem);
 
   res.status(201).json({
@@ -272,19 +399,52 @@ app.post('/api/queues', async (req, res) => {
   });
 });
 
-// 6. Call queue (PANGGIL)
+// 7. Batch Sync for Offline Queues (Prevents duplicates via clientId)
+app.post('/api/queues/sync', async (req, res) => {
+  const { offlineItems } = req.body || {};
+  if (!Array.isArray(offlineItems) || offlineItems.length === 0) {
+    res.json({ success: true, syncedCount: 0 });
+    return;
+  }
+
+  const currentQueues = await db.getQueues();
+  let syncedCount = 0;
+
+  for (const item of offlineItems) {
+    // Check if already synced by clientId or ID
+    const exists = currentQueues.some(
+      (q) => (item.clientId && q.clientId === item.clientId) || q.id === item.id
+    );
+
+    if (!exists) {
+      await db.upsertQueue(item);
+      syncedCount++;
+    }
+  }
+
+  if (syncedCount > 0) {
+    broadcastStateUpdate('SYNC');
+  }
+
+  res.json({
+    success: true,
+    syncedCount,
+    message: `${syncedCount} antrean offline berhasil disinkronkan ke database.`,
+  });
+});
+
+// 8. Call queue (PANGGIL - Kasir)
 app.post('/api/queues/:id/call', async (req, res) => {
   const { id } = req.params;
   const { operator, counter } = req.body || {};
 
   const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
     res.status(404).json({ error: 'Antrean tidak ditemukan' });
     return;
   }
 
-  const target = queues[itemIndex];
   const nowMs = Date.now();
   target.status = 'Dipanggil';
   target.calledAt = nowMs;
@@ -295,43 +455,80 @@ app.post('/api/queues/:id/call', async (req, res) => {
   if (operator) target.operator = operator;
   if (counter) target.counter = counter;
 
-  await db.saveQueues(queues);
+  await db.upsertQueue(target);
   broadcastStateUpdate('CALL', target);
 
   res.json({ success: true, item: target });
 });
 
-// 7. Recall queue (PANGGIL ULANG)
+// 9. Recall queue (PANGGIL ULANG)
 app.post('/api/queues/:id/recall', async (req, res) => {
   const { id } = req.params;
   const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
     res.status(404).json({ error: 'Antrean tidak ditemukan' });
     return;
   }
 
-  const target = queues[itemIndex];
   target.calledAt = Date.now();
   target.callCount = (target.callCount || 0) + 1;
 
-  await db.saveQueues(queues);
+  await db.upsertQueue(target);
   broadcastStateUpdate('RECALL', target);
 
   res.json({ success: true, item: target });
 });
 
-// 8. Complete queue (SELESAI)
-app.post('/api/queues/:id/complete', async (req, res) => {
+// 10. Process queue (DIPROSES - Dapur)
+app.post('/api/queues/:id/process', async (req, res) => {
   const { id } = req.params;
   const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
     res.status(404).json({ error: 'Antrean tidak ditemukan' });
     return;
   }
 
-  const target = queues[itemIndex];
+  target.status = 'Diproses';
+
+  await db.upsertQueue(target);
+  broadcastStateUpdate('PROCESS', target);
+
+  res.json({ success: true, item: target });
+});
+
+// 11. Ready queue (SIAP - Dapur)
+app.post('/api/queues/:id/ready', async (req, res) => {
+  const { id } = req.params;
+  const queues = await db.getQueues();
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
+    res.status(404).json({ error: 'Antrean tidak ditemukan' });
+    return;
+  }
+
+  const nowMs = Date.now();
+  target.status = 'Siap';
+  target.readyAt = nowMs;
+  target.jamSiap = getTimeString(nowMs);
+
+  await db.upsertQueue(target);
+  broadcastStateUpdate('READY', target);
+
+  res.json({ success: true, item: target });
+});
+
+// 12. Complete queue (SELESAI - Kasir / Dapur)
+app.post('/api/queues/:id/complete', async (req, res) => {
+  const { id } = req.params;
+  const queues = await db.getQueues();
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
+    res.status(404).json({ error: 'Antrean tidak ditemukan' });
+    return;
+  }
+
   const nowMs = Date.now();
   target.status = 'Selesai';
   target.completedAt = nowMs;
@@ -347,70 +544,60 @@ app.post('/api/queues/:id/complete', async (req, res) => {
     target.waitingDurationMinutes = Math.max(1, Math.round((nowMs - target.createdAt) / 60000));
   }
 
-  await db.saveQueues(queues);
+  await db.upsertQueue(target);
   broadcastStateUpdate('COMPLETE', target);
 
   res.json({ success: true, item: target });
 });
 
-// 9. Skip queue (LEWATI)
+// 13. Skip queue (LEWATI)
 app.post('/api/queues/:id/skip', async (req, res) => {
   const { id } = req.params;
   const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
     res.status(404).json({ error: 'Antrean tidak ditemukan' });
     return;
   }
 
-  const target = queues[itemIndex];
   target.status = 'Dilewati';
 
-  await db.saveQueues(queues);
+  await db.upsertQueue(target);
   broadcastStateUpdate('SKIP', target);
 
   res.json({ success: true, item: target });
 });
 
-// 10. Cancel queue (DIBATALKAN)
+// 14. Cancel queue (DIBATALKAN)
 app.post('/api/queues/:id/cancel', async (req, res) => {
   const { id } = req.params;
   const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
+  const target = queues.find((q) => q.id === id || q.clientId === id);
+  if (!target) {
     res.status(404).json({ error: 'Antrean tidak ditemukan' });
     return;
   }
 
-  const target = queues[itemIndex];
   target.status = 'Dibatalkan';
 
-  await db.saveQueues(queues);
+  await db.upsertQueue(target);
   broadcastStateUpdate('CANCEL', target);
 
   res.json({ success: true, item: target });
 });
 
-// 11. Delete queue (HAPUS YANG SALAH - Admin only)
+// 15. Delete queue (HAPUS YANG SALAH - Admin only)
 app.delete('/api/queues/:id', async (req, res) => {
   const { id } = req.params;
-  const queues = await db.getQueues();
-  const itemIndex = queues.findIndex((q) => q.id === id);
-  if (itemIndex === -1) {
-    res.status(404).json({ error: 'Antrean tidak ditemukan' });
-    return;
-  }
+  await db.deleteQueue(id);
+  broadcastStateUpdate('DELETE');
 
-  const removed = queues.splice(itemIndex, 1)[0];
-  await db.saveQueues(queues);
-  broadcastStateUpdate('DELETE', removed);
-
-  res.json({ success: true, removed });
+  res.json({ success: true, message: 'Antrean berhasil dihapus' });
 });
 
-// 12. Reset today's queue (RESET ANTREAN HARIAN - Admin only)
+// 16. Reset today's queue (RESET ANTREAN HARIAN - Admin only)
 app.post('/api/queues/reset', async (req, res) => {
-  await db.saveQueues([]);
+  await db.resetQueues();
   broadcastStateUpdate('RESET');
 
   res.json({ success: true, message: 'Semua antrean hari ini telah di-reset.' });
