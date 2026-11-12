@@ -1,25 +1,41 @@
-// Web Audio API Chime & Speech Synthesis for Canteen Queue
+// Web Audio API Chime & Speech Synthesis for Canteen Queue with bulletproof safety
 
 let audioCtx: AudioContext | null = null;
 
-function getAudioContext(): AudioContext {
-  if (!audioCtx) {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    audioCtx = new AudioContextClass();
+function getAudioContext(): AudioContext | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (!audioCtx) {
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {
+        // Ignored if user hasn't interacted with page yet
+      });
+    }
+    return audioCtx;
+  } catch (err) {
+    console.warn('AudioContext initialization warning:', err);
+    return null;
   }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-  return audioCtx;
 }
 
 /**
- * Plays a bright, pleasant 2-tone chime (ding-dong airport/counter chime)
+ * Plays a bright, pleasant 2-tone chime (ding-dong counter chime)
  */
 export function playChime(): Promise<void> {
   return new Promise((resolve) => {
     try {
       const ctx = getAudioContext();
+      if (!ctx) {
+        return resolve();
+      }
+
       const now = ctx.currentTime;
 
       // Note 1: E5 (659.25 Hz)
@@ -36,7 +52,7 @@ export function playChime(): Promise<void> {
       osc1.start(now);
       osc1.stop(now + 0.5);
 
-      // Note 2: C5 (523.25 Hz) with warm harmonic
+      // Note 2: C5 (523.25 Hz)
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = 'sine';
@@ -54,7 +70,7 @@ export function playChime(): Promise<void> {
         resolve();
       }, 900);
     } catch (e) {
-      console.warn('Audio chime error:', e);
+      console.warn('Audio chime warning:', e);
       resolve();
     }
   });
@@ -63,7 +79,6 @@ export function playChime(): Promise<void> {
 /**
  * Formats queue number for smooth Indonesian speech synthesis
  * e.g. "A025" -> "A kosong dua lima"
- * e.g. "025" -> "kosong dua lima"
  */
 export function formatNumberForSpeech(numStr: string): string {
   const digits: Record<string, string> = {
@@ -95,7 +110,7 @@ export function formatNumberForSpeech(numStr: string): string {
 }
 
 /**
- * Speaks the queue announcement:
+ * Speaks the queue announcement safely
  * "Nomor A025, atas nama Ahmad, silakan maju."
  */
 export async function announceQueue(
@@ -104,50 +119,62 @@ export async function announceQueue(
   onStart?: () => void,
   onEnd?: () => void
 ): Promise<void> {
-  // First play the chime
-  await playChime();
+  try {
+    // Attempt chime without throwing
+    await playChime().catch(() => {});
 
-  if (!('speechSynthesis' in window)) {
-    console.warn('Speech synthesis not supported');
-    if (onStart) onStart();
-    setTimeout(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      if (onStart) onStart();
+      setTimeout(() => {
+        if (onEnd) onEnd();
+      }, 1500);
+      return;
+    }
+
+    // Cancel any ongoing speech
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // Ignored
+    }
+
+    const spokenNumber = formatNumberForSpeech(queueNumber);
+    const text = `Nomor ${spokenNumber}, atas nama ${name}, silakan maju ke kasir.`;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'id-ID';
+    utterance.rate = 0.95;
+    utterance.pitch = 1.05;
+
+    // Try finding Indonesian voice if available
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      const idVoice = voices.find(
+        (v) => v.lang.toLowerCase().includes('id') || v.lang.toLowerCase().includes('ind')
+      );
+      if (idVoice) {
+        utterance.voice = idVoice;
+      }
+    } catch {
+      // Ignored
+    }
+
+    utterance.onstart = () => {
+      if (onStart) onStart();
+    };
+
+    utterance.onend = () => {
       if (onEnd) onEnd();
-    }, 1500);
-    return;
-  }
+    };
 
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
+    utterance.onerror = (e) => {
+      console.warn('Speech synthesis notice:', e);
+      if (onEnd) onEnd();
+    };
 
-  // Create utterance
-  // "Nomor A kosong dua lima, atas nama Ahmad, silakan maju."
-  const spokenNumber = formatNumberForSpeech(queueNumber);
-  const text = `Nomor ${spokenNumber}, atas nama ${name}, silakan maju.`;
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'id-ID';
-  utterance.rate = 0.95; // Clear and measured pace
-  utterance.pitch = 1.05;
-
-  // Try to find Indonesian voice if available
-  const voices = window.speechSynthesis.getVoices();
-  const idVoice = voices.find((v) => v.lang.toLowerCase().includes('id') || v.lang.toLowerCase().includes('ind'));
-  if (idVoice) {
-    utterance.voice = idVoice;
-  }
-
-  utterance.onstart = () => {
-    if (onStart) onStart();
-  };
-
-  utterance.onend = () => {
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn('Speech announcement warning:', err);
     if (onEnd) onEnd();
-  };
-
-  utterance.onerror = (e) => {
-    console.warn('Speech synthesis error:', e);
-    if (onEnd) onEnd();
-  };
-
-  window.speechSynthesis.speak(utterance);
+  }
 }

@@ -141,7 +141,10 @@ export default function App() {
           lastAction.item.name,
           () => setIsCallingAudio(true),
           () => setIsCallingAudio(false)
-        );
+        ).catch((err) => {
+          console.warn('Audio announcement caught error:', err);
+          setIsCallingAudio(false);
+        });
       }
     }
   }, [lastAction]);

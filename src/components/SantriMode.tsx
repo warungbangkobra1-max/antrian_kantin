@@ -68,7 +68,16 @@ export const SantriMode: React.FC<SantriModeProps> = ({
   const [cart, setCart] = useState<{ product: ProductItem; quantity: number }[]>([]);
 
   useEffect(() => {
-    api.getProducts().then((prods) => setProducts(prods));
+    api
+      .getProducts()
+      .then((prods) => {
+        if (Array.isArray(prods) && prods.length > 0) {
+          setProducts(prods);
+        }
+      })
+      .catch((err) => {
+        console.warn('Gagal memuat produk menu:', err);
+      });
   }, []);
 
   useEffect(() => {
